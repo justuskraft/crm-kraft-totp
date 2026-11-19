@@ -7,8 +7,19 @@
 </form>
 <div id="code">------</div><div id="left"></div><div id="err" style="color:#b00"></div>
 <script>
-function b32(s){s=s.replace(/[\s=-]/g,'').toUpperCase();const a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';let bits='';for(const c of s){const v=a.indexOf(c);if(v<0)throw'bad';bits+=v.toString(2).padStart(5,'0')}const out=new Uint8Array(Math.floor(bits.length/8));for(let i=0;i<out.length;i++)out[i]=parseInt(bits.substr(i*8,8),2);return out}
-async function totp(sec){const key=await crypto.subtle.importKey('raw',b32(sec),{name:'HMAC',hash:'SHA-1'},false,['sign']);const ctr=Math.floor(Date.now()/30000);const buf=new ArrayBuffer(8);const dv=new DataView(buf);dv.setUint32(4,ctr);const h=new Uint8Array(await crypto.subtle.sign('HMAC',key,buf));const o=h[19]&15;const n=((h[o]&127)<<24|h[o+1]<<16|h[o+2]<<8|h[o+3])%1e6;return String(n).padStart(6,'0')}
-async function tick(){const s=document.getElementById('secret').value;const left=30-Math.floor(Date.now()/1000)%30;document.getElementById('left').textContent=s?('noch '+left+' s gültig'):'';if(!s){document.getElementById('code').textContent='------';return}try{document.getElementById('code').textContent=await totp(s);document.getElementById('err').textContent=''}catch(e){document.getElementById('err').textContent='Secret ungültig'}}
-setInterval(tick,500);document.getElementById('secret').addEventListener('input',tick);
+// Accepts a plain Base32 secret OR a full otpauth:// link (secret, digits, period, algorithm are read from it).
+function parse(input){let s=input.trim(),digits=6,period=30,alg='SHA-1';
+ const m=s.match(/otpauth:\/\/[^\s]*/i);
+ if(m||/secret=/i.test(s)){const q=(m?m[0]:s);const qs=q.includes('?')?q.slice(q.indexOf('?')+1):q;const p=new URLSearchParams(qs);
+  const g=k=>{for(const [a,b] of p)if(a.toLowerCase()===k)return b;return null};
+  s=g('secret')||'';const d=parseInt(g('digits'));if(d>=6&&d<=10)digits=d;const pr=parseInt(g('period'));if(pr>0)period=pr;
+  const al=(g('algorithm')||'').toUpperCase().replace('-','');if(al==='SHA256')alg='SHA-256';else if(al==='SHA512')alg='SHA-512';}
+ try{s=decodeURIComponent(s)}catch(e){}
+ return {secret:s,digits,period,alg}}
+function b32(s){s=s.replace(/[\s=-]/g,'').toUpperCase();if(!s)throw'bad';const a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';let bits='';for(const c of s){const v=a.indexOf(c);if(v<0)throw'bad';bits+=v.toString(2).padStart(5,'0')}const out=new Uint8Array(Math.floor(bits.length/8));for(let i=0;i<out.length;i++)out[i]=parseInt(bits.substr(i*8,8),2);return out}
+async function totp(c,now){const key=await crypto.subtle.importKey('raw',b32(c.secret),{name:'HMAC',hash:c.alg},false,['sign']);const ctr=Math.floor(now/1000/c.period);const buf=new ArrayBuffer(8);const dv=new DataView(buf);dv.setUint32(0,Math.floor(ctr/4294967296));dv.setUint32(4,ctr>>>0);const h=new Uint8Array(await crypto.subtle.sign('HMAC',key,buf));const o=h[h.length-1]&15;const n=((h[o]&127)<<24|h[o+1]<<16|h[o+2]<<8|h[o+3])%Math.pow(10,c.digits);return String(n).padStart(c.digits,'0')}
+async function tick(){const v=document.getElementById('secret').value;if(!v){document.getElementById('code').textContent='------';document.getElementById('left').textContent='';document.getElementById('err').textContent='';return}
+ const c=parse(v);const left=c.period-Math.floor(Date.now()/1000)%c.period;document.getElementById('left').textContent='noch '+left+' s gültig';
+ try{document.getElementById('code').textContent=await totp(c,Date.now());document.getElementById('err').textContent=''}catch(e){document.getElementById('code').textContent='------';document.getElementById('err').textContent='Secret ungültig'}}
+if(typeof document!=='undefined'){setInterval(tick,500);document.getElementById('secret').addEventListener('input',tick);}
 </script></body></html>
